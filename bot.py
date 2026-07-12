@@ -35,7 +35,9 @@ STATUSES_RU = {
 
 # Единая функция, которая умеет фильтровать матчи
 def get_matches(status_filter="all"):
-    url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
+    # Добавили параметры dates (весь период турнира) и limit=100
+    url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260610-20260720&limit=100"
+    
     try:
         response = requests.get(url)
         data = response.json()
@@ -45,9 +47,8 @@ def get_matches(status_filter="all"):
             return "Матчи пока не найдены."
 
         filtered_events = []
-        # Фильтруем матчи по их состоянию (state)
         for event in events:
-            state = event['status']['type']['state'] # 'pre', 'in', 'post'
+            state = event['status']['type']['state']
             
             if status_filter == "completed" and state == "post":
                 filtered_events.append(event)
@@ -58,7 +59,7 @@ def get_matches(status_filter="all"):
             return "В этой категории пока нет доступных матчей."
 
         results_text = ""
-        # Берем последние 8 матчей из отфильтрованного списка (чтобы захватить весь плей-офф)
+        # Берем 8 последних матчей
         for event in filtered_events[-8:]:
             competitors = event['competitions'][0]['competitors']
             
@@ -67,11 +68,9 @@ def get_matches(status_filter="all"):
             team1 = TEAMS_RU.get(team1_eng, team1_eng)
             team2 = TEAMS_RU.get(team2_eng, team2_eng)
             
-            # Статус матча
             status_eng = event['status']['type']['shortDetail']
             status_ru = STATUSES_RU.get(status_eng, status_eng)
             
-            # Если матч запланирован, скрываем нулевой счет
             state = event['status']['type']['state']
             if state == "pre":
                 results_text += f"📅 {team1}  - : -  {team2}  *({status_ru})*\n"
