@@ -16,7 +16,7 @@ TEAMS_RU = {
     "Egypt": "Египет", "Colombia": "Колумбия", "Ghanas": "Гана",
     "Algeria": "Алжир", "Australia": "Австралия", "Cape Verde": "🇨🇻Кабо-Верде",
     "Paraguay": "Парагвай", "USA": "США", "United States": "США",
-    "Mexico": "Мексика", "Brazil": "Бразилия", "Portugal": "Португалия",
+    "Mexico": "Мексика", "Brazil": "Бразилия", "Portugal": "🇵🇹Португалия",
     "Netherlands": "Нидерланды", "Germany": "Германия", "Croatia": "Хорватия",
     "Japan": "Япония", "South Korea": "Южная Корея",
     # Добавляем неизвестных участников плей-офф
