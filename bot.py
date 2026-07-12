@@ -14,7 +14,7 @@ TEAMS_RU = {
     "England": "Англия", "Belgium": "Бельгия", "Norway": "Норвегия",
     "Switzerland": "Швейцария", "Morocco": "Марокко", "Canada": "Канада",
     "Egypt": "Египет", "Colombia": "Колумбия", "Ghanas": "Гана",
-    "Algeria": "Алжир", "Australia": "Австралия", "Cape Verde": "Кабо-Верде",
+    "Algeria": "Алжир", "Australia": "Австралия", "Cape Verde": "🇨🇻Кабо-Верде",
     "Paraguay": "Парагвай", "USA": "США", "United States": "США",
     "Mexico": "Мексика", "Brazil": "Бразилия", "Portugal": "Португалия",
     "Netherlands": "Нидерланды", "Germany": "Германия", "Croatia": "Хорватия",
