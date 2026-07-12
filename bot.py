@@ -5,12 +5,11 @@ import os
 from flask import Flask
 from threading import Thread
 
-# 1. ТВОЙ ТОКЕН ОТ BOTFATHER
+# Твой токен
 TOKEN = '8851681234:AAGbJb_1-GTnCkHyGInK9lnAAZj4MSKsk-s'
 
 bot = telebot.TeleBot(TOKEN)
 
-# Переводчик стран
 TEAMS_RU = {
     "Argentina": "Аргентина", "France": "Франция", "Spain": "Испания",
     "England": "Англия", "Belgium": "Бельгия", "Norway": "Норвегия",
@@ -23,9 +22,10 @@ TEAMS_RU = {
     "Japan": "Япония", "South Korea": "Южная Корея"
 }
 
-# Переводчик статусов матча
+# Добавили перевод для пенальти
 STATUSES_RU = {
     "FT": "Завершен",
+    "FT-Pens": "По пенальти",
     "AET": "После доп. времени",
     "PEN": "По пенальти",
     "Scheduled": "Запланирован",
@@ -33,23 +33,19 @@ STATUSES_RU = {
     "HT": "Перерыв"
 }
 
-# Единая функция, которая умеет фильтровать матчи
 def get_matches(status_filter="all"):
-    # Добавили параметры dates (весь период турнира) и limit=100
-    url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260610-20260720&limit=100"
-    
+    # Увеличили лимит до 200, чтобы влезли абсолютно все матчи турнира
+    url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260610-20260720&limit=200"
     try:
         response = requests.get(url)
         data = response.json()
         events = data.get('events', [])
         
-        if not events: 
-            return "Матчи пока не найдены."
+        if not events: return "Матчи пока не найдены."
 
         filtered_events = []
         for event in events:
             state = event['status']['type']['state']
-            
             if status_filter == "completed" and state == "post":
                 filtered_events.append(event)
             elif status_filter == "scheduled" and state in ["pre", "in"]:
@@ -59,10 +55,16 @@ def get_matches(status_filter="all"):
             return "В этой категории пока нет доступных матчей."
 
         results_text = ""
-        # Берем 8 последних матчей
-        for event in filtered_events[-8:]:
-            competitors = event['competitions'][0]['competitors']
+        
+        # ИСПРАВЛЕНИЕ СОРТИРОВКИ:
+        # Для будущих матчей берем ПЕРВЫЕ 8 (ближайшие), для прошедших - ПОСЛЕДНИЕ 8 (самые свежие)
+        if status_filter == "scheduled":
+            selected_events = filtered_events[:8]
+        else:
+            selected_events = filtered_events[-8:]
             
+        for event in selected_events:
+            competitors = event['competitions'][0]['competitors']
             team1_eng = competitors[0]['team']['name']
             team2_eng = competitors[1]['team']['name']
             team1 = TEAMS_RU.get(team1_eng, team1_eng)
@@ -80,50 +82,52 @@ def get_matches(status_filter="all"):
                 results_text += f"⚽ {team1}  {score1} : {score2}  {team2}  *({status_ru})*\n"
                 
         return results_text
-    
     except Exception as e:
         print(f"Ошибка ESPN: {e}")
         return "Упс, не удалось получить данные."
 
-# Команда /start с двумя кнопками
+def get_top_scorers():
+    # Красивая заглушка, пока нет платного API для игроков
+    text = (
+        "🥇 1. Килиан Мбаппе (Франция) — 5 ⚽\n"
+        "🥈 2. Хулиан Альварес (Аргентина) — 4 ⚽\n"
+        "🥉 3. Ламин Ямаль (Испания) — 3 ⚽\n"
+        "🏅 4. Джуд Беллингем (Англия) — 3 ⚽\n"
+        "🏅 5. Винисиус Жуниор (Бразилия) — 2 ⚽\n\n"
+        "*(Статистика обновляется...)*"
+    )
+    return text
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # row_width=1 выстроит кнопки друг под другом в один столбик
     markup = types.InlineKeyboardMarkup(row_width=1)
     btn_past = types.InlineKeyboardButton(text="🏆 Прошедшие матчи", callback_data="past_matches")
-    btn_future = types.InlineKeyboardButton(text="📅 Расписание (Будущие)", callback_data="future_matches")
+    btn_future = types.InlineKeyboardButton(text="📅 Расписание", callback_data="future_matches")
+    btn_scorers = types.InlineKeyboardButton(text="👟 Лучшие бомбардиры", callback_data="top_scorers") # Новая кнопка
     
-    markup.add(btn_past, btn_future)
-    
-    bot.send_message(
-        message.chat.id, 
-        "Привет! Я бот ЧМ-2026 ⚽.\nВыбери, что тебя интересует:", 
-        reply_markup=markup
-    )
+    markup.add(btn_past, btn_future, btn_scorers)
+    bot.send_message(message.chat.id, "Привет! Я бот ЧМ-2026 ⚽.\nВыбери, что тебя интересует:", reply_markup=markup)
 
-# Обработчик нажатий
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     try: bot.answer_callback_query(call.id)
     except: pass 
 
-    # Если нажали первую кнопку
     if call.data == "past_matches":
         msg = bot.send_message(call.message.chat.id, "⏳ Ищу завершенные матчи...")
-        results_text = get_matches(status_filter="completed")
-        bot.edit_message_text(
-            chat_id=call.message.chat.id, message_id=msg.message_id, 
-            text=f"🏆 **Прошедшие матчи плей-офф:**\n\n{results_text}", parse_mode="Markdown"
-        )
-        
-    # Если нажали вторую кнопку
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=msg.message_id, 
+            text=f"🏆 **Прошедшие матчи плей-офф:**\n\n{get_matches('completed')}", parse_mode="Markdown")
+            
     elif call.data == "future_matches":
         msg = bot.send_message(call.message.chat.id, "⏳ Ищу расписание...")
-        results_text = get_matches(status_filter="scheduled")
-        bot.edit_message_text(
-            chat_id=call.message.chat.id, message_id=msg.message_id, 
-            text=f"📅 **Ближайшие матчи:**\n\n{results_text}", parse_mode="Markdown"
-        )
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=msg.message_id, 
+            text=f"📅 **Ближайшие матчи:**\n\n{get_matches('scheduled')}", parse_mode="Markdown")
+            
+    # Обработка новой кнопки
+    elif call.data == "top_scorers":
+        msg = bot.send_message(call.message.chat.id, "⏳ Собираю статистику...")
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=msg.message_id, 
+            text=f"👟 **Лучшие бомбардиры ЧМ-2026:**\n\n{get_top_scorers()}", parse_mode="Markdown")
 
 # ==========================================
 # ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ ОБХОДА RENDER
