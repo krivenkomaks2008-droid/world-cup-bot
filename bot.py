@@ -10,6 +10,7 @@ TOKEN = '8851681234:AAGbJb_1-GTnCkHyGInK9lnAAZj4MSKsk-s'
 
 bot = telebot.TeleBot(TOKEN)
 
+# Переводчик стран
 TEAMS_RU = {
     "Argentina": "Аргентина", "France": "Франция", "Spain": "Испания",
     "England": "Англия", "Belgium": "Бельгия", "Norway": "Норвегия",
@@ -17,56 +18,116 @@ TEAMS_RU = {
     "Egypt": "Египет", "Colombia": "Колумбия", "Ghanas": "Гана",
     "Algeria": "Алжир", "Australia": "Австралия", "Cape Verde": "Кабо-Верде",
     "Paraguay": "Парагвай", "USA": "США", "United States": "США",
-    "Mexico": "Мексика", "Brazil": "Бразилия", "Portugal": "Португалия"
+    "Mexico": "Мексика", "Brazil": "Бразилия", "Portugal": "Португалия",
+    "Netherlands": "Нидерланды", "Germany": "Германия", "Croatia": "Хорватия",
+    "Japan": "Япония", "South Korea": "Южная Корея"
 }
 
-def get_football_results():
+# Переводчик статусов матча
+STATUSES_RU = {
+    "FT": "Завершен",
+    "AET": "После доп. времени",
+    "PEN": "По пенальти",
+    "Scheduled": "Запланирован",
+    "Halftime": "Перерыв",
+    "HT": "Перерыв"
+}
+
+# Единая функция, которая умеет фильтровать матчи
+def get_matches(status_filter="all"):
     url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
     try:
         response = requests.get(url)
         data = response.json()
         events = data.get('events', [])
-        if not events: return "Матчи пока не найдены."
+        
+        if not events: 
+            return "Матчи пока не найдены."
+
+        filtered_events = []
+        # Фильтруем матчи по их состоянию (state)
+        for event in events:
+            state = event['status']['type']['state'] # 'pre', 'in', 'post'
+            
+            if status_filter == "completed" and state == "post":
+                filtered_events.append(event)
+            elif status_filter == "scheduled" and state in ["pre", "in"]:
+                filtered_events.append(event)
+        
+        if not filtered_events:
+            return "В этой категории пока нет доступных матчей."
 
         results_text = ""
-        for event in events[-5:]:
+        # Берем последние 8 матчей из отфильтрованного списка (чтобы захватить весь плей-офф)
+        for event in filtered_events[-8:]:
             competitors = event['competitions'][0]['competitors']
-            team1_eng = competitors[0]['team']['name']
-            score1 = competitors[0].get('score', '-')
-            team2_eng = competitors[1]['team']['name']
-            score2 = competitors[1].get('score', '-')
             
+            team1_eng = competitors[0]['team']['name']
+            team2_eng = competitors[1]['team']['name']
             team1 = TEAMS_RU.get(team1_eng, team1_eng)
             team2 = TEAMS_RU.get(team2_eng, team2_eng)
             
-            status = event['status']['type']['shortDetail']
-            if status == "FT": status = "Завершен"
+            # Статус матча
+            status_eng = event['status']['type']['shortDetail']
+            status_ru = STATUSES_RU.get(status_eng, status_eng)
             
-            results_text += f"⚽ {team1} {score1} : {score2} {team2} *({status})*\n"
+            # Если матч запланирован, скрываем нулевой счет
+            state = event['status']['type']['state']
+            if state == "pre":
+                results_text += f"📅 {team1}  - : -  {team2}  *({status_ru})*\n"
+            else:
+                score1 = competitors[0].get('score', '0')
+                score2 = competitors[1].get('score', '0')
+                results_text += f"⚽ {team1}  {score1} : {score2}  {team2}  *({status_ru})*\n"
+                
         return results_text
+    
     except Exception as e:
         print(f"Ошибка ESPN: {e}")
         return "Упс, не удалось получить данные."
 
+# Команда /start с двумя кнопками
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(text="🏆 Узнать результаты", callback_data="get_results"))
-    bot.send_message(message.chat.id, "Привет! Я бот ЧМ-2026 ⚽.\nЖми на кнопку!", reply_markup=markup)
+    # row_width=1 выстроит кнопки друг под другом в один столбик
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    btn_past = types.InlineKeyboardButton(text="🏆 Прошедшие матчи", callback_data="past_matches")
+    btn_future = types.InlineKeyboardButton(text="📅 Расписание (Будущие)", callback_data="future_matches")
+    
+    markup.add(btn_past, btn_future)
+    
+    bot.send_message(
+        message.chat.id, 
+        "Привет! Я бот ЧМ-2026 ⚽.\nВыбери, что тебя интересует:", 
+        reply_markup=markup
+    )
 
+# Обработчик нажатий
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
-    if call.data == "get_results":
-        try: bot.answer_callback_query(call.id)
-        except: pass 
-        msg = bot.send_message(call.message.chat.id, "⏳ Спрашиваю у ESPN...")
+    try: bot.answer_callback_query(call.id)
+    except: pass 
+
+    # Если нажали первую кнопку
+    if call.data == "past_matches":
+        msg = bot.send_message(call.message.chat.id, "⏳ Ищу завершенные матчи...")
+        results_text = get_matches(status_filter="completed")
         bot.edit_message_text(
             chat_id=call.message.chat.id, message_id=msg.message_id, 
-            text=f"🏆 **Свежие матчи:**\n\n{get_football_results()}", parse_mode="Markdown"
+            text=f"🏆 **Прошедшие матчи плей-офф:**\n\n{results_text}", parse_mode="Markdown"
+        )
+        
+    # Если нажали вторую кнопку
+    elif call.data == "future_matches":
+        msg = bot.send_message(call.message.chat.id, "⏳ Ищу расписание...")
+        results_text = get_matches(status_filter="scheduled")
+        bot.edit_message_text(
+            chat_id=call.message.chat.id, message_id=msg.message_id, 
+            text=f"📅 **Ближайшие матчи:**\n\n{results_text}", parse_mode="Markdown"
         )
 
 # ==========================================
-# 2. ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ ОБХОДА RENDER
+# ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ ОБХОДА RENDER
 # ==========================================
 app = Flask(__name__)
 
@@ -78,9 +139,6 @@ def run_bot():
     bot.polling(none_stop=True)
 
 if __name__ == '__main__':
-    # Запускаем бота в отдельном фоновом потоке
     Thread(target=run_bot).start()
-    
-    # Запускаем веб-сервер, чтобы Render был доволен
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
