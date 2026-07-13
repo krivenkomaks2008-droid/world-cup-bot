@@ -106,8 +106,13 @@ def get_matches(status_filter="all", is_prediction=False):
         selected = filtered_matches[:5] if status_filter == "scheduled" else filtered_matches[-5:]
         
         for match in selected:
-            home_eng = match.get('homeTeam', {}).get('name', 'Определяется...')
-            away_eng = match.get('awayTeam', {}).get('name', 'Определяется...')
+            # Более надежная проверка на пустоту от API
+            home_eng = match.get('homeTeam', {}).get('name')
+            away_eng = match.get('awayTeam', {}).get('name')
+            
+            if not home_eng: home_eng = 'Определяется...'
+            if not away_eng: away_eng = 'Определяется...'
+            
             home = TEAMS_RU.get(home_eng, home_eng)
             away = TEAMS_RU.get(away_eng, away_eng)
             
@@ -115,11 +120,13 @@ def get_matches(status_filter="all", is_prediction=False):
             date_str = dt.strftime("%d.%m в %H:%M")
             
             if is_prediction and status_filter == "scheduled":
-                p1 = TEAM_POWER.get(home, 75)
-                p2 = TEAM_POWER.get(away, 75)
-                
-                # Вызываем наш симулятор
-                prediction_result = simulate_match(home, away, p1, p2)
+                # ❗️ Защита от вангования на неизвестных командах
+                if home == 'Определяется...' or away == 'Определяется...':
+                    prediction_result = "⏳ _Команды еще не определены_"
+                else:
+                    p1 = TEAM_POWER.get(home, 75)
+                    p2 = TEAM_POWER.get(away, 75)
+                    prediction_result = simulate_match(home, away, p1, p2)
                 
                 results_text += f"📅 **{date_str}**\n⚔️ {home} vs {away}\n🔮 Прогноз: {prediction_result}\n━━━━━━━━━━━━━━━━━━\n"
             
@@ -133,7 +140,8 @@ def get_matches(status_filter="all", is_prediction=False):
                     results_text += f"📅 **{date_str}**\n⚽ {home}  **{h_score or 0} : {a_score or 0}** {away}\n_{status_ru}_\n━━━━━━━━━━━━━━━━━━\n"
                 
         return results_text
-    except Exception:
+    except Exception as e:
+        print(f"Ошибка: {e}")
         return "Упс, не удалось получить данные."
 
 def get_top_scorers():
@@ -159,6 +167,20 @@ def get_top_scorers():
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
+    # 1. Создаем команду для удаления старой нижней клавиатуры
+    remove_keyboard = types.ReplyKeyboardRemove()
+    
+    # 2. Отправляем техническое сообщение, которое сотрет старые кнопки
+    msg = bot.send_message(
+        message.chat.id, 
+        "⏳ Загрузка интерфейса...", 
+        reply_markup=remove_keyboard
+    )
+    
+    # 3. Сразу же удаляем это техническое сообщение, чтобы не мусорить в чате
+    bot.delete_message(message.chat.id, msg.message_id)
+
+    # 4. Отправляем наше нормальное меню с новыми прозрачными кнопками
     bot.send_message(
         message.chat.id, 
         "Привет! Я бот ЧМ-2026 ⚽.\nВыбери нужный раздел в меню ниже:", 
