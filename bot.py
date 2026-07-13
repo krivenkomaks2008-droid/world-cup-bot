@@ -117,9 +117,9 @@ def send_welcome(message):
     markup.add(types.KeyboardButton("🏆 Прошедшие"), types.KeyboardButton("📅 Расписание"))
     markup.add(types.KeyboardButton("👟 Бомбардиры"))
     
-    bot.send_message(message.chat.id, "Привет! Я бот ЧМ-2026 ⚽.\nМеню внизу экрана, а также слева в кнопке ☰", reply_markup=markup)
+    bot.send_message(message.chat.id, "Привет! Я бот ЧМ-2026 ⚽.\nМеню внизу экрана, а также слева в кнопке ☰. Жми на кнопку, чтобы выбрать действие.", reply_markup=markup)
 
-# --- НОВЫЙ БЛОК: Обработчик системных команд ---
+# ---  Обработчик системных команд ---
 @bot.message_handler(commands=['past', 'future', 'scorers'])
 def handle_commands(message):
     if message.text == '/past':
