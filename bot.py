@@ -2,17 +2,16 @@ import telebot
 from telebot import types
 import requests
 import os
+import random
 from flask import Flask
 from threading import Thread
 from datetime import datetime, timedelta
 
-# Твои ключи
 TOKEN = '8851681234:AAGbJb_1-GTnCkHyGInK9lnAAZj4MSKsk-s'
 FOOTBALL_API_KEY = '99f70f9e8fc24cb19383b53a9f4e2324' 
 
 bot = telebot.TeleBot(TOKEN)
 
-# Прокачанный словарь со всеми флагами
 TEAMS_RU = {
     "Argentina": "🇦🇷 Аргентина", "France": "🇫🇷 Франция", "Spain": "🇪🇸 Испания",
     "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Англия", "Belgium": "🇧🇪 Бельгия", "Norway": "🇳🇴 Норвегия",
@@ -22,122 +21,181 @@ TEAMS_RU = {
     "Paraguay": "🇵🇾 Парагвай", "USA": "🇺🇸 США", "United States": "🇺🇸 США",
     "Mexico": "🇲🇽 Мексика", "Brazil": "🇧🇷 Бразилия", "Portugal": "🇵🇹 Португалия",
     "Netherlands": "🇳🇱 Нидерланды", "Germany": "🇩🇪 Германия", "Croatia": "🇭🇷 Хорватия",
-    "Japan": "🇯🇵 Япония", "South Korea": "🇰🇷 Южная Корея"
+    "Japan": "🇯🇵 Япония", "South Korea": "🇰🇷 Южная Корея",
+    "Semifinal 1 Winner": "Победитель ПФ 1", "Semifinal 2 Winner": "Победитель ПФ 2",
+    "Semifinal 1 Loser": "Проигравший в ПФ 1", "Semifinal 2 Loser": "Проигравший в ПФ 2"
 }
 
 STATUSES_RU = {
     "FINISHED": "Завершен", "IN_PLAY": "Идет сейчас", "PAUSED": "Перерыв",
-    "SCHEDULED": "Запланирован", "TIMED": "Запланирован", "PENALTY_SHOOTOUT": "Серия пенальти"
+    "SCHEDULED": "Запланирован", "TIMED": "Запланирован", "PENALTY_SHOOTOUT": "Пенальти"
 }
 
-def get_matches(status_filter="all"):
+# Наш рейтинг силы команд
+TEAM_POWER = {
+    "🇦🇷 Аргентина": 96, "🇫🇷 Франция": 95, "🇪🇸 Испания": 94, "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Англия": 93,
+    "🇧🇷 Бразилия": 94, "🇩🇪 Германия": 90, "🇵🇹 Португалия": 91, "🇧🇪 Бельгия": 88,
+    "🇳🇱 Нидерланды": 89, "🇨🇭 Швейцария": 82, "🇲🇦 Марокко": 83, "🇭🇷 Хорватия": 85
+}
+
+# --- ФУНКЦИИ ДЛЯ КЛАВИАТУР ---
+
+def get_main_menu():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🏆 Прошедшие матчи", callback_data="past"),
+        types.InlineKeyboardButton("📅 Расписание матчей", callback_data="future"),
+        types.InlineKeyboardButton("🔮 AI-Симуляция тура", callback_data="predictions"),
+        types.InlineKeyboardButton("👟 Лучшие бомбардиры", callback_data="scorers")
+    )
+    return markup
+
+def get_back_button():
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("🔙 Назад в меню", callback_data="main_menu"))
+    return markup
+
+# --- НОВАЯ ФУНКЦИЯ: СИМУЛЯТОР МАТЧА ---
+
+def simulate_match(home_team, away_team, p1, p2):
+    diff = p1 - p2
+    
+    # Симуляция 90 минут (от 0 до 3 голов, сдвиг зависит от разницы в силе)
+    goals_1 = max(0, random.randint(0, 3) + (1 if diff > 4 else 0))
+    goals_2 = max(0, random.randint(0, 3) + (1 if diff < -4 else 0))
+    
+    if goals_1 > goals_2:
+        return f"**{goals_1} : {goals_2}** (Проход {home_team})"
+    elif goals_2 > goals_1:
+        return f"**{goals_1} : {goals_2}** (Проход {away_team})"
+    else:
+        # Ничья -> Симуляция дополнительного времени
+        et_1 = random.randint(0, 1)
+        et_2 = random.randint(0, 1)
+        
+        final_1 = goals_1 + et_1
+        final_2 = goals_2 + et_2
+        
+        if final_1 > final_2:
+            return f"**{final_1} : {final_2}** (В доп. время проходит {home_team})"
+        elif final_2 > final_1:
+            return f"**{final_1} : {final_2}** (В доп. время проходит {away_team})"
+        else:
+            # Снова ничья -> Серия пенальти (шансы 50/50)
+            winner = home_team if random.choice([True, False]) else away_team
+            return f"**{final_1} : {final_2}** (По пенальти проходит {winner})"
+
+# --- ФУНКЦИИ ПОЛУЧЕНИЯ ДАННЫХ ---
+
+def get_matches(status_filter="all", is_prediction=False):
     url = "https://api.football-data.org/v4/competitions/WC/matches"
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
     
     try:
         response = requests.get(url, headers=headers)
         data = response.json()
-        
-        if 'errorCode' in data: return f"❌ Ошибка API: {data.get('message', 'Неизвестная ошибка')}"
+        if 'errorCode' in data: return "❌ Ошибка API."
             
         matches = data.get('matches', [])
         if not matches: return "Матчи пока не найдены."
 
-        filtered_matches = []
-        for match in matches:
-            status = match['status']
-            if status_filter == "completed" and status == "FINISHED":
-                filtered_matches.append(match)
-            elif status_filter == "scheduled" and status in ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED"]:
-                filtered_matches.append(match)
-                
-        if not filtered_matches: return "В этой категории пока нет доступных матчей."
+        filtered_matches = [m for m in matches if (status_filter == "completed" and m['status'] == "FINISHED") or (status_filter == "scheduled" and m['status'] in ["SCHEDULED", "TIMED", "IN_PLAY"])]
+        if not filtered_matches: return "В этой категории пока нет матчей."
 
         results_text = ""
-        selected = filtered_matches[:8] if status_filter == "scheduled" else filtered_matches[-8:]
+        selected = filtered_matches[:5] if status_filter == "scheduled" else filtered_matches[-5:]
         
         for match in selected:
             home_eng = match.get('homeTeam', {}).get('name', 'Определяется...')
             away_eng = match.get('awayTeam', {}).get('name', 'Определяется...')
-            home_team = TEAMS_RU.get(home_eng, home_eng)
-            away_team = TEAMS_RU.get(away_eng, away_eng)
+            home = TEAMS_RU.get(home_eng, home_eng)
+            away = TEAMS_RU.get(away_eng, away_eng)
             
-            status_eng = match['status']
-            status_ru = STATUSES_RU.get(status_eng, status_eng)
+            dt = datetime.strptime(match['utcDate'], "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=3)
+            date_str = dt.strftime("%d.%m в %H:%M")
             
-            raw_date = match['utcDate'] 
-            dt = datetime.strptime(raw_date, "%Y-%m-%dT%H:%M:%SZ") + timedelta(hours=3)
-            match_date = dt.strftime("%d.%m в %H:%M")
+            if is_prediction and status_filter == "scheduled":
+                p1 = TEAM_POWER.get(home, 75)
+                p2 = TEAM_POWER.get(away, 75)
+                
+                # Вызываем наш симулятор
+                prediction_result = simulate_match(home, away, p1, p2)
+                
+                results_text += f"📅 **{date_str}**\n⚔️ {home} vs {away}\n🔮 Прогноз: {prediction_result}\n━━━━━━━━━━━━━━━━━━\n"
             
-            if status_eng in ["SCHEDULED", "TIMED"]:
-                results_text += f"📅 **{match_date}**\n⚽ {home_team}  **- : -** {away_team}\n_{status_ru}_\n━━━━━━━━━━━━━━━━━━\n"
             else:
-                home_score = match['score']['fullTime'].get('home', 0)
-                away_score = match['score']['fullTime'].get('away', 0)
-                if home_score is None: home_score = 0
-                if away_score is None: away_score = 0
-                results_text += f"📅 **{match_date}**\n⚽ {home_team}  **{home_score} : {away_score}** {away_team}\n_{status_ru}_\n━━━━━━━━━━━━━━━━━━\n"
+                status_ru = STATUSES_RU.get(match['status'], match['status'])
+                if match['status'] in ["SCHEDULED", "TIMED"]:
+                    results_text += f"📅 **{date_str}**\n⚽ {home}  **- : -** {away}\n_{status_ru}_\n━━━━━━━━━━━━━━━━━━\n"
+                else:
+                    h_score = match['score']['fullTime'].get('home', 0)
+                    a_score = match['score']['fullTime'].get('away', 0)
+                    results_text += f"📅 **{date_str}**\n⚽ {home}  **{h_score or 0} : {a_score or 0}** {away}\n_{status_ru}_\n━━━━━━━━━━━━━━━━━━\n"
                 
         return results_text
-    except Exception as e:
+    except Exception:
         return "Упс, не удалось получить данные."
 
 def get_top_scorers():
     url = "https://api.football-data.org/v4/competitions/WC/scorers"
     headers = {"X-Auth-Token": FOOTBALL_API_KEY}
-    
     try:
-        response = requests.get(url, headers=headers)
-        data = response.json()
-        
-        if 'errorCode' in data: return f"❌ Ошибка API: {data.get('message', 'Неизвестная ошибка')}"
-            
+        data = requests.get(url, headers=headers).json()
+        if 'errorCode' in data: return "❌ Ошибка API."
         scorers = data.get('scorers', [])
-        if not scorers: return "Пока нет данных о бомбардирах."
+        if not scorers: return "Нет данных о бомбардирах."
         
         text = ""
         medals = ["🥇", "🥈", "🥉", "🏅", "🏅"]
-        
         for i, scorer in enumerate(scorers[:5]):
-            player_name = scorer['player']['name']
-            team_eng = scorer['team']['name']
-            team_ru = TEAMS_RU.get(team_eng, team_eng)
-            goals = scorer['goals']
-            
-            medal = medals[i] if i < len(medals) else "🏅"
-            text += f"{medal} {i+1}. {player_name} ({team_ru}) — **{goals}** ⚽\n"
-            
+            name = scorer['player']['name']
+            team = TEAMS_RU.get(scorer['team']['name'], scorer['team']['name'])
+            text += f"{medals[i]} {i+1}. {name} ({team}) — **{scorer['goals']}** ⚽\n"
         return text
-    except Exception as e:
+    except Exception:
         return "Упс, не удалось получить статистику."
 
-@bot.message_handler(commands=['start'])
+# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
+
+@bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(types.KeyboardButton("🏆 Прошедшие"), types.KeyboardButton("📅 Расписание"))
-    markup.add(types.KeyboardButton("👟 Бомбардиры"))
-    
-     bot.send_message(message.chat.id, "Привет! Я бот ЧМ-2026 ⚽.\nМеню внизу экрана, а также слева в кнопке ☰. " \
-    "Жми на кнопку, чтобы выбрать действие.", reply_markup=markup)
+    bot.send_message(
+        message.chat.id, 
+        "Привет! Я бот ЧМ-2026 ⚽.\nВыбери нужный раздел в меню ниже:", 
+        reply_markup=get_main_menu()
+    )
 
-# ---  Обработчик системных команд ---
-@bot.message_handler(commands=['past', 'future', 'scorers'])
-def handle_commands(message):
-    if message.text == '/past':
-        bot.send_message(message.chat.id, f"🏆 **Прошедшие матчи:**\n\n{get_matches('completed')}", parse_mode="Markdown")
-    elif message.text == '/future':
-        bot.send_message(message.chat.id, f"📅 **Ближайшие матчи:**\n\n{get_matches('scheduled')}", parse_mode="Markdown")
-    elif message.text == '/scorers':
-        bot.send_message(message.chat.id, f"👟 **Лучшие бомбардиры:**\n\n{get_top_scorers()}", parse_mode="Markdown")
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass 
 
-@bot.message_handler(content_types=['text'])
-def handle_text(message):
-    if message.text == "🏆 Прошедшие":
-        bot.send_message(message.chat.id, f"🏆 **Прошедшие матчи:**\n\n{get_matches('completed')}", parse_mode="Markdown")
-    elif message.text == "📅 Расписание":
-        bot.send_message(message.chat.id, f"📅 **Ближайшие матчи:**\n\n{get_matches('scheduled')}", parse_mode="Markdown")
-    elif message.text == "👟 Бомбардиры":
-        bot.send_message(message.chat.id, f"👟 **Лучшие бомбардиры:**\n\n{get_top_scorers()}", parse_mode="Markdown")
+    chat_id = call.message.chat.id
+    msg_id = call.message.message_id
+
+    if call.data == "main_menu":
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, 
+            text="Главное меню ⚽. Что тебя интересует?", reply_markup=get_main_menu())
+
+    elif call.data == "past":
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, 
+            text=f"🏆 **Прошедшие матчи:**\n\n{get_matches('completed')}", 
+            parse_mode="Markdown", reply_markup=get_back_button())
+            
+    elif call.data == "future":
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, 
+            text=f"📅 **Ближайшие матчи:**\n\n{get_matches('scheduled')}", 
+            parse_mode="Markdown", reply_markup=get_back_button())
+            
+    elif call.data == "predictions":
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, 
+            text=f"🔮 **AI-Симуляция тура:**\n\n{get_matches('scheduled', is_prediction=True)}", 
+            parse_mode="Markdown", reply_markup=get_back_button())
+            
+    elif call.data == "scorers":
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, 
+            text=f"👟 **Лучшие бомбардиры:**\n\n{get_top_scorers()}", 
+            parse_mode="Markdown", reply_markup=get_back_button())
 
 # ==========================================
 # ФЕЙКОВЫЙ ВЕБ-СЕРВЕР ДЛЯ ОБХОДА RENDER
